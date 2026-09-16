@@ -11,150 +11,181 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: GPSSampleScreen(),
+      title: 'GPS Field Collector',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const GpsStatusPage(),
     );
   }
 }
 
-class GPSSampleScreen extends StatefulWidget {
-  const GPSSampleScreen({super.key});
+class GpsStatusPage extends StatefulWidget {
+  const GpsStatusPage({super.key});
 
   @override
-  _GPSSampleScreenState createState() => _GPSSampleScreenState();
+  State<GpsStatusPage> createState() => _GpsStatusPageState();
 }
 
-class _GPSSampleScreenState extends State<GPSSampleScreen> {
-  String _selectedType = 'Sewer Line';
-  final TextEditingController _customerKeyController = TextEditingController();
-  
-  Position? _currentPosition;
-  double? _accuracy;
-  bool _isLoading = false;
-  String? _errorMessage;
+class _GpsStatusPageState extends State<GpsStatusPage> {
+  String _statusMessage = "GPS Ready to Scan";
+  String _lat = "0.000000";
+  String _long = "0.000000";
+  String _accuracy = "0.0";
+  String _altitude = "0.0";
+  bool _isFetching = false;
 
-  Future<void> _detectGPSPoint() async {
+  // Function to fetch high-precision GPS data targeting <= 5.0m
+  Future<void> _fetchGpsData() async {
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _isFetching = true;
+      _statusMessage = "Acquiring satellites & fixing position...";
     });
 
     bool serviceEnabled;
     LocationPermission permission;
 
+    // Check if location services are enabled
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       setState(() {
-        _errorMessage = 'GPS አልበራም። እባክዎን Location ያብሩ።';
-        _isLoading = false;
+        _statusMessage = "GPS is disabled. Please turn on Location.";
+        _isFetching = false;
       });
       return;
     }
 
+    // Check permissions
     permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         setState(() {
-          _errorMessage = 'የLocation ፍቃድ አልተሰጠም።';
-          _isLoading = false;
+          _statusMessage = "Location permissions are denied.";
+          _isFetching = false;
         });
         return;
       }
     }
 
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        _statusMessage = "Permissions permanently denied. Enable in settings.";
+        _isFetching = false;
+      });
+      return;
+    }
+
     try {
+      // Force high accuracy for <= 5m target
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.bestForNavigation,
+        desiredAccuracy: LocationAccuracy.best,
+        timeLimit: const Duration(seconds: 15),
       );
 
       setState(() {
-        _currentPosition = position;
-        _accuracy = position.accuracy;
-        _isLoading = false;
-
-        if (position.accuracy > 5.0) {
-          _errorMessage = 'GPS accuracy (${position.accuracy.toStringAsFixed(1)}m) too low. Need ≤5.0m. Try again in an open area.';
+        _lat = position.latitude.toStringAsFixed(6);
+        _long = position.longitude.toStringAsFixed(6);
+        _accuracy = position.accuracy.toStringAsFixed(1);
+        _altitude = position.altitude.toStringAsFixed(1);
+        
+        if (position.accuracy <= 5.0) {
+          _statusMessage = "High Accuracy Fix Achieved (<= 5m)";
+        } else {
+          _statusMessage = "Low Accuracy. Move to an open sky area.";
         }
+        _isFetching = false;
       });
     } catch (e) {
       setState(() {
-        _errorMessage = 'ቦታውን ማግኘት አልተቻለም፦ $e';
-        _isLoading = false;
+        _statusMessage = "Error fetching GPS: $e";
+        _isFetching = false;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    bool isSaveEnabled = _currentPosition != null && _accuracy != null && _accuracy! <= 5.0;
+    double accValue = double.tryParse(_accuracy) ?? 99.0;
+    bool isGoodAccuracy = accValue <= 5.0 && accValue > 0.0;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Take Sample GPS Point'),
-        backgroundColor: Colors.indigo[900],
+        title: const Text('GPS Field Data Status'),
+        backgroundColor: Colors.blueGrey,
+        foregroundColor: Colors.white,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<String>(
-              value: _selectedType,
-              decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
-              items: ['Sewer Line', 'Water Line', 'Customer Point']
-                  .map((label) => DropdownMenuItem(value: label, child: Text(label)))
-                  .toList(),
-              onChanged: (value) => setState(() => _selectedType = value!),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _customerKeyController,
-              decoration: const InputDecoration(labelText: 'Customer Key', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 10),
-            const Text('Line types can use one or more detected locations.', style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading ? null : _detectGPSPoint,
-                icon: const Icon(Icons.my_location),
-                label: Text(_isLoading ? 'Detecting...' : 'Detect GPS Point'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isGoodAccuracy ? Colors.green[50] : Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isGoodAccuracy ? Colors.green : Colors.orange,
                 ),
               ),
+              child: Text(
+                _statusMessage,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: isGoodAccuracy ? Colors.green[800] : Colors.orange[900],
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
-            const SizedBox(height: 15),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton(
-                onPressed: isSaveEnabled ? () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('የGPS መረጃው በትክክል ተመዝግቧል!')),
-                  );
-                } : null,
-                child: const Text('Save'),
+            const SizedBox(height: 20),
+            Card(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    _buildInfoRow("Latitude:", _lat),
+                    const Divider(),
+                    _buildInfoRow("Longitude:", _long),
+                    const Divider(),
+                    _buildInfoRow("Accuracy:", "$_accuracy meters"),
+                    const Divider(),
+                    _buildInfoRow("Altitude:", "$_altitude meters"),
+                  ],
+                ),
               ),
             ),
             const Spacer(),
-            if (_errorMessage != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red[700],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _errorMessage!,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ),
+            _isFetching
+                ? const Center(child: CircularProgressIndicator())
+                : ElevatedButton.icon(
+                    onPressed: _fetchGpsData,
+                    icon: const Icon(Icons.my_location),
+                    label: const Text('Get Precise GPS Fix'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+        Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 }
